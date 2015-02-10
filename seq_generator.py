@@ -1,91 +1,98 @@
+import os
 import argparse
 import random
 import json
-import os
+from contextlib import nested
+
 
 def get_parser():
-	parser = argparse.ArgumentParser(description='Simple sequence generator')
-	parser.add_argument('-d','--dest', action="store",default="output", help="Destination folder")
-	parser.add_argument('config', action="store", help="JSON config file")
+    parser = argparse.ArgumentParser(description='Simple sequence generator')
+    parser.add_argument(
+        '-d', '--dest', action="store", default="output", help="Destination folder")
+    parser.add_argument('config', action="store", help="JSON config file")
+    return parser
 
-	return parser
+
+def gen_mutated_seq(seq, error_prob, substitution_only):
+    def substitution(nucl):
+        short__nucls = _NUCLS[:]
+        short__nucls.remove(nucl)
+        return short__nucls[random.randint(0, len(short__nucls) - 1)], "s"
+
+    def deletion(nucl):
+        return "", "d"
+
+    def addition(nucl):
+        side = random.randint(0, 1)
+        if side == 0:
+            return _NUCLS[random.randint(0, len(_NUCLS) - 1)] + nucl, "a"
+        else:
+            return nucl + _NUCLS[random.randint(0, len(_NUCLS) - 1)], "a"
+
+    options = [deletion, addition, substitution]
+    report = {}
+    new_seq = []
+    for i, nucl in enumerate(seq):
+        if error_prob > random.uniform(0.0, 1.0):
+            if substitution_only:
+                new_nucl, sym = substitution(nucl)
+                report.update({i: [sym, nucl, new_nucl]})
+            else:
+                new_nucl, sym = options[
+                    random.randint(0, len(options) - 1)](nucl)
+                report.update({i: [sym, nucl, new_nucl]})
+        else:
+            new_nucl = nucl
+        new_seq.append(new_nucl)
+    return "".join(new_seq), report
 
 
-				
-
-def mutate(nucl, error_prob,supstitution_only):
-	is_error = error_prob>random.uniform(0.0,1.0)
-	if is_error:
-		def substitution(nucl):
-				short_nucls = nucls[:]
-				short_nucls.remove(nucl)
-				return short_nucls[random.randint(0, len(short_nucls)-1)]
-
-		if supstitution_only:
-			nucl = substitution(nucl)
-		else:
-			def deletion(nucl):
-				return ""
-			def addition(nucl):
-				side = random.randint(0, 1)
-				if side==0:
-					return nucls[random.randint(0, len(nucls)-1)] + nucl 
-				else:
-					return nucl + nucls[random.randint(0, len(nucls)-1)]
-
-			options =[deletion, addition, substitution]
-			nucl = options[random.randint(0, len(options)-1)](nucl)
-			
-
-	return nucl
 def main():
-	args=get_parser().parse_args()
-	config = None
-	
-	with open(args.config) as json_file:
-		config = json.load(json_file)
- 
+    args = get_parser().parse_args()
 
-	if not os.path.isdir(args.dest):
-		os.mkdir(args.dest)	
-	"""
-	Stvaranje baznih sekvenci 
-	"""
-	for lenght in config['lenghts']:
-		
-		lenght_dir = "%s/len_%d"%(args.dest, lenght)
-		if not os.path.isdir(lenght_dir):
-			os.mkdir(lenght_dir)	
+    with open(args.config) as json_file:
+        try:
+            config = json.load(json_file)
+        except ValueError:
+            print "Config file is not in json format"
+            exit()
+    if not all(param in config for param in ("lenghts", "error_probs", "seq_counts", "substitution_only")):
+        print "Config file missing parameters"
+        exit()
 
-		with open("%s/base"%lenght_dir, 'w') as fout:
-			for i in xrange(lenght):
-				nucl = nucls[random.randint(0, len(nucls)-1)]
-				fout.write(nucl)
-	
+    if not os.path.isdir(args.dest):
+        os.mkdir(args.dest)
+    """
+    Stvaranje baznih sekvenci
+    """
+    for lenght in config['lenghts']:
+        with open("%s/len_%d_base.fa" % (args.dest, lenght), 'w') as fout:
+            for i in xrange(lenght):
+                nucl = _NUCLS[random.randint(0, len(_NUCLS) - 1)]
+                fout.write(nucl)
+    """
+    Stvaranje mutiranih sekvenci
+    """
+    substitution_only = config["substitution_only"]
+    with open("%s/all.fa" % args.dest, "w") as fout_all:
+        for lenght in config['lenghts']:
+            for (seq_count, error_prob) in zip(config["seq_counts"], config["error_probs"]):
+                for i in xrange(seq_count):
+                    with nested(
+                        open("%s/len_%d_base.fa" % (args.dest, lenght), 'r'),
+                        open("%s/len_%d_p_%g_%d.fa" %
+                             (args.dest, lenght, error_prob, i + 1), 'w')
+                    ) as (fin, fout):
+                        seq = fin.read()
+                        mutated_seq, report = gen_mutated_seq(
+                            seq, error_prob, substitution_only)
+                        title = ">p_%g_%d%s\n" % (error_prob, i + 1, json.dumps(report))
+                        fout.write(title)
+                        fout.write(mutated_seq + "\n")
 
-	"""
-	Stvaranje mutiranih sekvenci
-	"""
-
-	for lenght in config['lenghts']: 
-		lenght_dir = "%s/len_%d"%(args.dest, lenght)
-		for error_prob_index, seq_count in enumerate(config["seq_counts"]):
-			error_prob = config["error_probs"][error_prob_index]
-
-			error_prob_dir = ("%s/len_%d/err_%f"%(args.dest, lenght,error_prob)).rstrip('0').rstrip('.')
-			if not os.path.isdir(error_prob_dir):
-				os.mkdir(error_prob_dir)	
-
-			for i in xrange(seq_count):
-				with open("%s/base"%lenght_dir, 'r') as fin:
-					with open("%s/%d"%(error_prob_dir, i+1), 'w') as fout:
-						for j in xrange(lenght):
-							nucl = fin.read(1)
-							new_nucl=mutate(nucl,error_prob, config["substitution_only"])
-							fout.write(new_nucl)
-
+                        fout_all.write(title)
+                        fout_all.write(mutated_seq + "\n")
 
 if __name__ == '__main__':
-	nucls = ['A', 'C', 'G', 'T']
-	main()
-
+    _NUCLS = ['A', 'C', 'G', 'T']
+    main()
