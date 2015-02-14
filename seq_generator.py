@@ -67,9 +67,9 @@ def main():
     """
     for lenght in config['lenghts']:
         with open("%s/len_%d_base.fa" % (args.dest, lenght), 'w') as fout:
-            for i in xrange(lenght):
-                nucl = _NUCLS[random.randint(0, len(_NUCLS) - 1)]
-                fout.write(nucl)
+            fout.write(">base\n")
+            base_seq = "".join([_NUCLS[random.randint(0,3)] for i in range(lenght)])
+            fout.write(base_seq)
     """
     Stvaranje mutiranih sekvenci
     """
@@ -83,10 +83,12 @@ def main():
                         open("%s/len_%d_p_%g_%d.fa" %
                              (args.dest, lenght, error_prob, i + 1), 'w')
                     ) as (fin, fout):
+                        seq_title = fin.readline()
                         seq = fin.read()
                         mutated_seq, report = gen_mutated_seq(
                             seq, error_prob, substitution_only)
-                        title = ">p_%g_%d%s\n" % (error_prob, i + 1, json.dumps(report))
+                        title = ">len_%d_p_%g_%d%s\n" % (
+                            lenght,error_prob, i + 1, json.dumps(report))
                         fout.write(title)
                         fout.write(mutated_seq + "\n")
 
