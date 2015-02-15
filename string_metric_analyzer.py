@@ -28,7 +28,6 @@ def extract_from_title(title):
     diffs = json.loads(splited[4][split_point:])
     return lenght, p, i, diffs
 
-
 def main():
     args = get_parser().parse_args()
     with open(args.metrics) as json_file:
@@ -44,24 +43,30 @@ def main():
     if not os.path.isdir(args.dest):
         os.mkdir(args.dest)
     report = {}
-    error, total = 0, 0
     for metric in config["string_metrics"]:
-        report.update(
-            {metric: {"positive": [], "negative": []}})
+        report.update({metric: {"lenghts":{}, "error_probs":{}}})
         for record in SeqIO.parse(args.source + "/all.fa", "fasta"):
             lenght, error_prob, index, diffs = extract_from_title(record.description)
+            #set report statistics if lenght or error probability apears for the first time
+            if lenght not in report[metric]["lenghts"]:
+                    report[metric]["lenghts"].update({lenght:{"bad":0,"total":1}})
+            else:
+                report[metric]["lenghts"][lenght]["total"]+=1
+            if error_prob not in report[metric]["error_probs"]:
+                report[metric]["error_probs"].update({error_prob:{"bad":0,"total":1}})
+            else:
+                report[metric]["error_probs"][error_prob]["total"]+=1
+
+            #get apropriate base record
             for base_records in SeqIO.parse("%s/len_%d_base.fa" % (args.source, lenght), "fasta"):
                 base_record = base_records
                 break
+            #use metric to get match percentage
             match = float(check_output([str(metric), str(record.seq), str(base_record.seq)]))
-            if abs(1 - match - error_prob) < ERROR_MARGIN:
-                pass
-            else:
-                error += 1
-                report[metric]["negative"].append(
-                    ">len_%d_p_%g_%d" % (lenght, error_prob, index))
-            total += 1
-    print error, "/", total
+
+            if abs(1 - match - error_prob) > ERROR_MARGIN:
+                report[metric]["lenghts"][lenght]["bad"]+=1
+                report[metric]["error_probs"][error_prob]["bad"]+=1
     with open("%s/report.json" % (args.dest), 'w') as fout:
         json.dump(report, fout)
 
