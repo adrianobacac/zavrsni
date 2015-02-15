@@ -2,7 +2,12 @@ import os
 import argparse
 import json
 from subprocess import check_output
+from itertools import cycle
+import operator
+
 from Bio import SeqIO
+import numpy as np
+import matplotlib.pyplot as plt
 
 
 def get_parser():
@@ -28,6 +33,68 @@ def extract_from_title(title):
     diffs = json.loads(splited[4][split_point:])
     return lenght, p, i, diffs
 
+
+def draw_graphs(report, dest):
+    draw_error_prob_graph(report, dest)
+    draw_lenght_graph(report, dest)
+
+
+def draw_error_prob_graph(report, dest):
+    fig, ax = plt.subplots()
+
+    for i, metric in enumerate(report):
+        color = _COLORS.next()
+        error_probs = report[metric]["error_probs"].keys()
+        error_probs.sort()
+        percentages = [pair["bad"] * 100.0 / pair["total"]
+                       for pair in [report[metric]["error_probs"][error_prob] for error_prob in error_probs]]
+        index = np.arange(len(error_probs))
+
+        bar_width = 1.0 / len(report)
+        opacity = 0.4
+        plt.bar(index + i * bar_width, percentages, bar_width,
+                alpha=opacity,
+                color=color,
+                label=metric)
+
+        plt.xlabel('Error probabilities')
+        plt.ylabel('Failure percentage')
+        plt.title('Failure percentage by error probability')
+        plt.xticks(index + bar_width * len(report) / 2.0, error_probs)
+
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(dest + "/error_probs.png")
+
+
+def draw_lenght_graph(report, dest):
+    fig, ax = plt.subplots()
+
+    for i, metric in enumerate(report):
+        color = _COLORS.next()
+        lenghts = report[metric]["lenghts"].keys()
+        lenghts.sort()
+        percentages = [pair["bad"] * 100.0 / pair["total"]
+                       for pair in [report[metric]["lenghts"][lenght] for lenght in lenghts]]
+        index = np.arange(len(lenghts))
+
+        bar_width = 1.0 / len(report)
+        opacity = 0.4
+        plt.bar(index + i * bar_width, percentages, bar_width,
+                alpha=opacity,
+                color=color,
+                label=metric)
+
+        plt.xlabel('Lenghts')
+        plt.ylabel('Failure percentage')
+        plt.title('Failure percentage by lenghts')
+        plt.xticks(index + bar_width * len(report) / 2.0, lenghts)
+
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(dest + "/lenghts.png")
+
+
 def main():
     args = get_parser().parse_args()
     with open(args.metrics) as json_file:
@@ -44,32 +111,39 @@ def main():
         os.mkdir(args.dest)
     report = {}
     for metric in config["string_metrics"]:
-        report.update({metric: {"lenghts":{}, "error_probs":{}}})
+        report.update({metric: {"lenghts": {}, "error_probs": {}}})
         for record in SeqIO.parse(args.source + "/all.fa", "fasta"):
-            lenght, error_prob, index, diffs = extract_from_title(record.description)
-            #set report statistics if lenght or error probability apears for the first time
+            lenght, error_prob, index, diffs = extract_from_title(
+                record.description)
+            # set report statistics if lenght or error probability apears for
+            # the first time
             if lenght not in report[metric]["lenghts"]:
-                    report[metric]["lenghts"].update({lenght:{"bad":0,"total":1}})
+                report[metric]["lenghts"].update(
+                    {lenght: {"bad": 0, "total": 1}})
             else:
-                report[metric]["lenghts"][lenght]["total"]+=1
+                report[metric]["lenghts"][lenght]["total"] += 1
             if error_prob not in report[metric]["error_probs"]:
-                report[metric]["error_probs"].update({error_prob:{"bad":0,"total":1}})
+                report[metric]["error_probs"].update(
+                    {error_prob: {"bad": 0, "total": 1}})
             else:
-                report[metric]["error_probs"][error_prob]["total"]+=1
+                report[metric]["error_probs"][error_prob]["total"] += 1
 
-            #get apropriate base record
+            # get apropriate base record
             for base_records in SeqIO.parse("%s/len_%d_base.fa" % (args.source, lenght), "fasta"):
                 base_record = base_records
                 break
-            #use metric to get match percentage
-            match = float(check_output([str(metric), str(record.seq), str(base_record.seq)]))
+            # use metric to get match percentage
+            match = float(
+                check_output([str(metric), str(record.seq), str(base_record.seq)]))
 
-            if abs(1 - match - error_prob) > ERROR_MARGIN:
-                report[metric]["lenghts"][lenght]["bad"]+=1
-                report[metric]["error_probs"][error_prob]["bad"]+=1
+            if abs(1 - match - error_prob) > _ERROR_MARGIN:
+                report[metric]["lenghts"][lenght]["bad"] += 1
+                report[metric]["error_probs"][error_prob]["bad"] += 1
     with open("%s/report.json" % (args.dest), 'w') as fout:
         json.dump(report, fout)
+    draw_graphs(report, args.dest)
 
 if __name__ == '__main__':
-    ERROR_MARGIN = 0.1
+    _COLORS = cycle('bgrcmk')
+    _ERROR_MARGIN = 0.1
     main()
