@@ -16,7 +16,7 @@
 using namespace std;
 
 // Default value of the k parameter.
-const int kK = 10;
+const int kK = 5;
 
 int main(int argc, char* argv[]) {
 	if(argc!=3){

@@ -1,13 +1,24 @@
 import os
+import time
 import argparse
 import json
 from subprocess import check_output
 from itertools import cycle
-import operator
 
 from Bio import SeqIO
 import numpy as np
 import matplotlib.pyplot as plt
+
+
+class Timer:
+
+    def __enter__(self):
+        self.start = time.clock()
+        return self
+
+    def __exit__(self, *args):
+        self.end = time.clock()
+        self.interval = self.end - self.start
 
 
 def get_parser():
@@ -33,66 +44,64 @@ def extract_from_title(title):
     diffs = json.loads(splited[4][split_point:])
     return lenght, p, i, diffs
 
-
-def draw_graphs(report, dest):
-    draw_error_prob_graph(report, dest)
-    draw_lenght_graph(report, dest)
-
-
-def draw_error_prob_graph(report, dest):
-    fig, ax = plt.subplots()
+def draw_time_graph(report, dest):
+    fig = plt.figure()
+    ax = plt.subplot(111)
 
     for i, metric in enumerate(report):
-        color = _COLORS.next()
-        error_probs = report[metric]["error_probs"].keys()
-        error_probs.sort()
-        percentages = [pair["bad"] * 100.0 / pair["total"]
-                       for pair in [report[metric]["error_probs"][error_prob] for error_prob in error_probs]]
-        index = np.arange(len(error_probs))
 
-        bar_width = 1.0 / len(report)
-        opacity = 0.4
-        plt.bar(index + i * bar_width, percentages, bar_width,
-                alpha=opacity,
-                color=color,
-                label=metric)
-
-        plt.xlabel('Error probabilities')
-        plt.ylabel('Failure percentage')
-        plt.title('Failure percentage by error probability')
-        plt.xticks(index + bar_width * len(report) / 2.0, error_probs)
-
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(dest + "/error_probs.png")
-
-
-def draw_lenght_graph(report, dest):
-    fig, ax = plt.subplots()
-
-    for i, metric in enumerate(report):
-        color = _COLORS.next()
         lenghts = report[metric]["lenghts"].keys()
         lenghts.sort()
-        percentages = [pair["bad"] * 100.0 / pair["total"]
-                       for pair in [report[metric]["lenghts"][lenght] for lenght in lenghts]]
+        times = [report[metric]["lenghts"][lenght]["time"] for lenght in lenghts]
         index = np.arange(len(lenghts))
 
         bar_width = 1.0 / len(report)
         opacity = 0.4
-        plt.bar(index + i * bar_width, percentages, bar_width,
+
+        color = _COLORS.next()
+        ax.bar(index + i * bar_width, times, bar_width,
                 alpha=opacity,
                 color=color,
                 label=metric)
-
-        plt.xlabel('Lenghts')
-        plt.ylabel('Failure percentage')
-        plt.title('Failure percentage by lenghts')
         plt.xticks(index + bar_width * len(report) / 2.0, lenghts)
 
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(dest + "/lenghts.png")
+    plt.xlabel('Sequence lenght')
+    plt.ylabel('Time for all sequences [s]')
+    plt.title('Time comparison')
+    # Shrink current axis's height by 10% on the bottom
+    box = ax.get_position()
+    ax.set_position([box.x0, box.y0 + box.height * 0.1,
+                 box.width, box.height * 0.9])
+
+    # Put a legend below current axis
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15),
+          fancybox=True, shadow=True, ncol=5)
+
+    plt.savefig(dest + "/times.png")
+
+def draw_analysis_graph(report, dest):
+    for metric in report:
+        fig, ax = plt.subplots()
+        lenghts = report[metric]["lenghts"].keys()
+        lenghts.sort()
+        for lenght in lenghts:
+            color = _COLORS.next()
+            error_probs = [
+                error_prob for error_prob in report[metric]["lenghts"][lenght]["error_probs"]]
+            error_probs.sort()
+            percentages = [(pair["total"] - pair["bad"]) * 100.0 / pair["total"] for pair in [
+                report[metric]["lenghts"][lenght]["error_probs"][error_prob] for error_prob in error_probs]]
+
+            plt.plot([error_prob * 100 for error_prob in error_probs], percentages, marker='o', color=color, label=lenght)
+
+        plt.ylabel('Percentage of correct similarity match')
+        plt.xlabel('Percentage difference from base sequence')
+        plt.title(metric)
+
+        plt.legend()
+        plt.tight_layout()
+        plt.ylim([0,100])
+        plt.savefig(dest + "/" + metric.replace("/", "_") + ".png")
 
 
 def main():
@@ -111,7 +120,7 @@ def main():
         os.mkdir(args.dest)
     report = {}
     for metric in config["string_metrics"]:
-        report.update({metric: {"lenghts": {}, "error_probs": {}}})
+        report.update({metric: {"lenghts": {}, "time": 0}})
         for record in SeqIO.parse(args.source + "/all.fa", "fasta"):
             lenght, error_prob, index, diffs = extract_from_title(
                 record.description)
@@ -119,35 +128,46 @@ def main():
             # the first time
             if lenght not in report[metric]["lenghts"]:
                 report[metric]["lenghts"].update(
-                    {lenght: {"bad": 0, "total": 1}})
+                    {lenght: {"error_probs": {error_prob: {"bad": 0, "total": 0, "time": 0}}, "time": 0}})
+
+            if error_prob not in report[metric]["lenghts"][lenght]["error_probs"]:
+                report[metric]["lenghts"][lenght]["error_probs"].update(
+                    {error_prob: {"bad": 0, "total": 1, "time": 0}})
             else:
-                report[metric]["lenghts"][lenght]["total"] += 1
-            if error_prob not in report[metric]["error_probs"]:
-                report[metric]["error_probs"].update(
-                    {error_prob: {"bad": 0, "total": 1}})
-            else:
-                report[metric]["error_probs"][error_prob]["total"] += 1
+                report[metric]["lenghts"][lenght][
+                    "error_probs"][error_prob]["total"] += 1
 
             # get apropriate base record
             for base_records in SeqIO.parse("%s/len_%d_base.fa" % (args.source, lenght), "fasta"):
                 base_record = base_records
                 break
+
             # use metric to get match percentage
-            if metric.endswith(".py"):
-                match = float(
-                    check_output(["python", str(metric), str(record.seq), str(base_record.seq)]))
-            else:
-                match = float(
-                    check_output([str(metric), str(record.seq), str(base_record.seq)]))
+            with Timer() as t:
+                if metric.endswith(".py"):
+                    match = float(
+                        check_output(["python", str(metric), str(record.seq), str(base_record.seq)]))
+                else:
+                    match = float(
+                        check_output([str(metric), str(record.seq), str(base_record.seq)]))
+
+            # add time to report
+            report[metric]["lenghts"][lenght]["error_probs"][
+                error_prob]["time"] += t.interval
+            report[metric]["lenghts"][lenght]["time"] += t.interval
+            report[metric]["time"] += t.interval
 
             if abs(1 - match - error_prob) > _ERROR_MARGIN:
-                report[metric]["lenghts"][lenght]["bad"] += 1
-                report[metric]["error_probs"][error_prob]["bad"] += 1
+                report[metric]["lenghts"][lenght][
+                    "error_probs"][error_prob]["bad"] += 1
+
     with open("%s/report.json" % (args.dest), 'w') as fout:
-        json.dump(report, fout)
-    draw_graphs(report, args.dest)
+        json.dump(report, fout, indent=4, sort_keys=True)
+
+    draw_analysis_graph(report, args.dest)
+    draw_time_graph(report, args.dest)
 
 if __name__ == '__main__':
     _COLORS = cycle('bgrcmk')
-    _ERROR_MARGIN = 0.1
+    _ERROR_MARGIN = 0.03
     main()
