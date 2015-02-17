@@ -133,8 +133,12 @@ def main():
                 base_record = base_records
                 break
             # use metric to get match percentage
-            match = float(
-                check_output([str(metric), str(record.seq), str(base_record.seq)]))
+            if metric.endswith(".py"):
+                match = float(
+                    check_output(["python", str(metric), str(record.seq), str(base_record.seq)]))
+            else:
+                match = float(
+                    check_output([str(metric), str(record.seq), str(base_record.seq)]))
 
             if abs(1 - match - error_prob) > _ERROR_MARGIN:
                 report[metric]["lenghts"][lenght]["bad"] += 1
