@@ -1,3 +1,10 @@
 {
-	"string_metrics":["lcskpp/metric_lcskpp", "lcskpp/metric_lcsk"]
+	"string_metrics":
+		[
+			"levenshtein/leven.py",
+			"sor_dice_coef/sdc.py",
+			"lcskpp/metric_lcskpp_slow",
+			"lcskpp/metric_lcskpp_fast",
+			"lcsk/metric_lcsk"
+		]
 }
